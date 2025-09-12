@@ -1,0 +1,148 @@
+//- email-template.pug
+doctype html
+html(lang="en")
+  head
+    meta(charset="UTF-8")
+    meta(name="viewport" content="width=device-width, initial-scale=1.0")
+    title= subject
+    style(type="text/css").
+      /* Base Styles */
+      body {
+        font-family: 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+        line-height: 1.6;
+        color: #333333;
+        background-color: #f7f7f7;
+        margin: 0;
+        padding: 0;
+      }
+
+      /* Email Container */
+      .email-container {
+        max-width: 600px;
+        margin: 0 auto;
+        background-color: #ffffff;
+        border-radius: 8px;
+        overflow: hidden;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+      }
+
+      /* Header */
+      .email-header {
+        background-color: #4a6bff;
+        padding: 24px;
+        text-align: center;
+      }
+
+      .email-header h1 {
+        color: #ffffff;
+        margin: 0;
+        font-size: 24px;
+        font-weight: 600;
+      }
+
+      /* Content */
+      .email-content {
+        padding: 32px;
+      }
+
+      .email-content h2 {
+        color: #2c3e50;
+        margin-top: 0;
+        font-size: 20px;
+        font-weight: 600;
+      }
+
+      .email-content p {
+        margin-bottom: 20px;
+        font-size: 16px;
+      }
+
+      /* Button */
+      .btn {
+        display: inline-block;
+        padding: 12px 24px;
+        background-color: #4a6bff;
+        color: #ffffff !important;
+        text-decoration: none;
+        border-radius: 4px;
+        font-weight: 600;
+        margin: 16px 0;
+      }
+
+      .btn:hover {
+        background-color: #3a5bef;
+      }
+
+      /* Footer */
+      .email-footer {
+        padding: 24px;
+        text-align: center;
+        background-color: #f1f5f9;
+        font-size: 14px;
+        color: #64748b;
+      }
+
+      .email-footer a {
+        color: #4a6bff;
+        text-decoration: none;
+      }
+
+      /* Responsive */
+      @media only screen and (max-width: 600px) {
+        .email-container {
+          border-radius: 0;
+        }
+
+        .email-content {
+          padding: 24px;
+        }
+      }
+
+  body
+    .email-container
+      .email-header
+        h1= subject || 'Welcome to Our Service'
+
+      .email-content
+        case template
+          when 'welcome'
+            h2 Welcome aboard, #{firstName}!
+            p Thank you for creating an account with us. We're excited to have you on board.
+            p Your account has been successfully created with the email: 
+              strong #{email}
+            p To get started, please verify your email address by clicking the button below:
+            a.btn(href=url) Verify Email
+            p If you didn't create an account, please ignore this email.
+
+          when 'passwordReset'
+            h2 Password Reset Request
+            p We received a request to reset your password for your account (#{email}).
+            p Click the button below to reset your password. This link will expire in one hours.
+            a.btn(href=url) Reset Password
+            p If you didn't request a password reset, please ignore this email or contact support.
+
+          when 'updatePassword'
+            h2 Password Changed Successfully
+            p This is a confirmation that the password for your account (#{email}) has been changed.
+            p If you didn't make this change, please contact our support team immediately or admin.
+
+          when 'accountUpdate'
+            h2 Account Information Updated
+            p Your account information has been successfully updated.
+            p If you didn't make these changes, please contact our support team immediately or admin.
+
+
+          default
+            h2 Hello, #{firstName}!
+            p !{message}
+            if actionLink
+              a.btn(href=actionLink) !{actionText || 'Take Action'}
+
+      .email-footer
+        p © #{new Date().getFullYear()} #{companyName || 'Ethio-Home'}. All rights reserved.
+        p
+          | Need help? 
+          a(href=supportLink || '#') Contact our support team
+        if unsubscribeLink
+          p
+            a(href=unsubscribeLink) Unsubscribe from these emails
