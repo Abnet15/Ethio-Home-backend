@@ -136,7 +136,7 @@ app.all('*',(req, res, next) => {
 app.use(globalErrorHandler);
 
 // Connect to MongoDB
-const dbURI = process.env.MONGODB_URI;
+const dbURI = process.env.DATABASE;
 mongoose.connect(dbURI, {
   useNewUrlParser: true,
   useUnifiedTopology: true
