@@ -1,28 +1,47 @@
 # Contributing Guide
 
-## Workflow
-1. Create a branch from `main`: feature/<name> or bugfix/<name>
-2. Write code + tests
-3. Run lint and tests: `npm run lint`, `npm test`
-4. Open a PR with a clear description
+Thanks for contributing! This guide helps changes ship smoothly.
+
+## Branching & Workflow
+- Branch from `main`: `feature/<name>`, `bugfix/<name>`, `chore/<name>`
+- Keep branches small and focused
+- Rebase against `main` before opening a PR
+
+## Setup
+```bash
+npm install
+npm run dev
+npm test
+npm run lint
+```
 
 ## Commit Messages (Conventional Commits)
-- feat(scope): ...
-- fix(scope): ...
-- docs(scope): ...
-- refactor(scope): ...
-- perf(scope): ...
-- test(scope): ...
-- chore(scope): ...
+- `feat(auth): add refresh token`
+- `fix(api): correct validation status code`
+- `docs(readme): add setup section`
+- `refactor(users): simplify repository`
+- `perf(db): add index for email lookup`
+- `test(users): cover pagination edge cases`
+- `chore(ci): add workflow badge`
 
-## Code Style
-- Keep functions small and readable
-- Prefer early returns, avoid deep nesting
-- Don’t swallow errors; handle meaningfully
+## Pull Requests
+- Fill a clear description and context
+- Link issues if applicable
+- Add tests for non-trivial changes
+- Update docs (`README.md`, `API.md`) when needed
 
-## PR Checklist
-- [ ] Tests added/updated
-- [ ] Lint passes
-- [ ] Docs updated if needed
+## Code Quality
+- Prefer early returns; avoid deep nesting
+- No empty catch blocks; handle errors meaningfully
+- Keep functions small and cohesive
+
+## Reviews & Merging
+- Maintainers review within 1–3 business days
+- Squash or merge commits depending on size; keep meaningful history
+
+## Releases
+- Semantic Versioning
+- Update `CHANGELOG.md`
+- Tag with `vX.Y.Z`
 
 
