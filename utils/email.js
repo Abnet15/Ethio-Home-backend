@@ -44,8 +44,8 @@ module.exports = class Email {
     const html = pug.renderFile(`${__dirname}/../views/email.pug`, {
       firstName: this.firstName,
       url: this.url,
-      email: this.to
-      ,subject, template, message, actionLink, actionText
+      email: this.to,
+      subject, template, message, actionLink, actionText
     });
 
     // 2) Define email options
