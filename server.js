@@ -136,19 +136,69 @@ app.all('*',(req, res, next) => {
 app.use(globalErrorHandler);
 
 // Connect to MongoDB
-const dbURI = process.env.MONGODB_URI;
-mongoose.connect(dbURI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true
-})
+// Use DATABASE (MongoDB Atlas) if available, otherwise fall back to MONGODB_URI
+const dbURI = process.env.DATABASE || process.env.MONGODB_URI;
+
+if (!dbURI) {
+  console.error('Neither DATABASE nor MONGODB_URI is defined in environment variables!');
+  process.exit(1);
+}
+
+// Log which connection string is being used (without credentials)
+const dbInfo = dbURI.includes('@') 
+  ? dbURI.split('@')[1] 
+  : dbURI;
+console.log('Using MongoDB connection:', dbInfo);
+
+// MongoDB connection options (Mongoose 7.x compatible)
+// Note: useNewUrlParser and useUnifiedTopology are deprecated in Mongoose 7.x
+// bufferMaxEntries and bufferCommands are not supported in Mongoose 7.x
+const mongooseOptions = {
+  serverSelectionTimeoutMS: 30000, // 30 seconds
+  socketTimeoutMS: 45000, // 45 seconds
+  connectTimeoutMS: 30000, // 30 seconds
+  maxPoolSize: 10, // Maintain up to 10 socket connections
+  minPoolSize: 2, // Maintain at least 2 socket connections
+  maxIdleTimeMS: 30000, // Close connections after 30 seconds of inactivity
+  retryWrites: true,
+  w: 'majority'
+};
+
+mongoose.connect(dbURI, mongooseOptions)
 .then(() => {
   console.log('DB connection successful!');
-  console.log('Connected to:', dbURI);
+  console.log('Connected to MongoDB');
+  // Don't log the full URI for security
+  if (dbURI.includes('@')) {
+    const dbName = dbURI.split('/').pop().split('?')[0];
+    console.log('Database:', dbName);
+  }
 })
 .catch((err) => {
-  console.error('MongoDB connection error:', err);
+  console.error('MongoDB connection error:', err.message);
   console.error('Please check your database connection and try again.');
+  console.error('Make sure MONGODB_URI is correctly set in config.env');
   process.exit(1);
+});
+
+// Handle connection events
+mongoose.connection.on('connected', () => {
+  console.log('Mongoose connected to MongoDB');
+});
+
+mongoose.connection.on('error', (err) => {
+  console.error('Mongoose connection error:', err);
+});
+
+mongoose.connection.on('disconnected', () => {
+  console.warn('Mongoose disconnected from MongoDB');
+});
+
+// Graceful shutdown
+process.on('SIGINT', async () => {
+  await mongoose.connection.close();
+  console.log('MongoDB connection closed through app termination');
+  process.exit(0);
 });
 
 // Start server
