@@ -162,19 +162,26 @@ exports.getOne = (Model, Options) =>
       doc={
         ...doc.toObject(),
         imagesUrl: doc.images.map(file => {
-          // If file is already a full URL, use it as is
-          if (file.startsWith('http://') || file.startsWith('https://')) {
+          // If file is already a full URL (Cloudinary), use it as is
+          if (file && (file.startsWith('http://') || file.startsWith('https://'))) {
             return file;
           }
-          // Otherwise, construct the local URL
-          return `http://127.0.0.1:5000/img/properties/${file}`;
-        })
+          // Fallback for old local files (backward compatibility)
+          if (file) {
+            return `http://127.0.0.1:5000/img/properties/${file}`;
+          }
+          return null;
+        }).filter(url => url !== null)
       }
     }
     if(Model.modelName ==='User'){  
+      // If photo is already a Cloudinary URL, use it; otherwise construct local URL
+      const photoUrl = doc.photo && (doc.photo.startsWith('http://') || doc.photo.startsWith('https://'))
+        ? doc.photo
+        : `http://127.0.0.1:5000/img/users/${doc.photo || 'default.png'}`;
       doc={
         ...doc.toObject(),
-        imagesUrl: `http://127.0.0.1:5000/img/users/${doc.photo}`
+        imagesUrl: photoUrl
       }
     }
     //console.log(doc);
@@ -240,21 +247,30 @@ exports.getAll = Model =>
       doc=doc.map(el=>({
         ...el.toObject(),
         imagesUrl: el.images.map(file => {
-          // If file is already a full URL, use it as is
-          if (file.startsWith('http://') || file.startsWith('https://')) {
+          // If file is already a full URL (Cloudinary), use it as is
+          if (file && (file.startsWith('http://') || file.startsWith('https://'))) {
             return file;
           }
-          // Otherwise, construct the local URL
-          return `http://127.0.0.1:5000/img/properties/${file}`;
-        })
+          // Fallback for old local files (backward compatibility)
+          if (file) {
+            return `http://127.0.0.1:5000/img/properties/${file}`;
+          }
+          return null;
+        }).filter(url => url !== null)
       }))
     }
 
     if(Model.modelName ==='User'){
-      doc=doc.map(el=>({
-        ...el.toObject(),
-        imagesUrl: `http://127.0.0.1:5000/img/users/${el.photo}`
-      }))
+      doc=doc.map(el=>{
+        // If photo is already a Cloudinary URL, use it; otherwise construct local URL
+        const photoUrl = el.photo && (el.photo.startsWith('http://') || el.photo.startsWith('https://'))
+          ? el.photo
+          : `http://127.0.0.1:5000/img/users/${el.photo || 'default.png'}`;
+        return {
+          ...el.toObject(),
+          imagesUrl: photoUrl
+        };
+      })
     }
 
       res.status(200).json({

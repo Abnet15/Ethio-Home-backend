@@ -14,6 +14,7 @@ const cookieParser = require('cookie-parser');
 const compression = require('compression');
 const globalErrorHandler = require('./controllers/errorController');
 const AppError=require('./utils/appError')
+const socketAuth = require('./utils/socketAuth');
 const propertyRoutes = require('./routes/propertyRoutes');
 const userRoutes = require('./routes/userRoutes');
 const interestRoutes = require('./routes/interestRoutes');
@@ -34,28 +35,91 @@ process.on('uncaughtException', (err) => {
 const app = express();
 const server = http.createServer(app);
 
-// Socket.io setup for realtime messaging
+// Socket.io setup for realtime messaging with JWT authentication
 const io = new Server(server, {
   cors: {
-    origin: "*",
+    origin: process.env.CORS_ORIGIN || "*",
     methods: ["GET", "POST"],
     credentials: true,
   },
+  transports: ['websocket', 'polling'],
 });
 
 global.io = io;
 
-io.on('connection', (socket) => {
-  const userId = socket.handshake.query.userId;
-  if (userId) {
-    socket.join(userId);
-    console.log(`Socket connected for user ${userId}`);
+// Store online users
+const onlineUsers = new Map(); // userId -> socketId
+
+// Socket authentication middleware
+io.use(socketAuth);
+
+io.on('connection', async (socket) => {
+  const userId = socket.userId;
+  const user = socket.user;
+  
+  if (!userId || !user) {
+    console.log('Socket connection rejected: Invalid authentication');
+    socket.disconnect();
+    return;
   }
 
+  // Join user's personal room
+  socket.join(userId);
+  
+  // Track online user
+  onlineUsers.set(userId, socket.id);
+  
+  // Notify user is online
+  socket.broadcast.emit('user:online', { userId, user: { _id: user._id, name: user.name, photo: user.photo } });
+  
+  console.log(`✅ Socket connected for user ${userId} (${user.name})`);
+
+  // Handle typing indicators
+  socket.on('message:typing', (data) => {
+    const { recipientId, isTyping } = data;
+    if (recipientId && recipientId !== userId) {
+      socket.to(recipientId).emit('message:typing', {
+        senderId: userId,
+        sender: { _id: user._id, name: user.name, photo: user.photo },
+        isTyping
+      });
+    }
+  });
+
+  // Handle message read receipts
+  socket.on('message:read', (data) => {
+    const { messageId, senderId } = data;
+    if (senderId && senderId !== userId) {
+      socket.to(senderId).emit('message:read', {
+        messageId,
+        readBy: userId,
+        readAt: new Date()
+      });
+    }
+  });
+
+  // Handle disconnect
   socket.on('disconnect', () => {
-    if (userId) console.log(`Socket disconnected for user ${userId}`);
+    onlineUsers.delete(userId);
+    socket.broadcast.emit('user:offline', { userId });
+    console.log(`❌ Socket disconnected for user ${userId}`);
+  });
+
+  // Handle errors
+  socket.on('error', (error) => {
+    console.error(`Socket error for user ${userId}:`, error);
   });
 });
+
+// Helper function to get online users
+global.getOnlineUsers = () => {
+  return Array.from(onlineUsers.keys());
+};
+
+// Helper function to check if user is online
+global.isUserOnline = (userId) => {
+  return onlineUsers.has(userId);
+};
 
 app.set('view engine', 'pug');
 app.set('views', path.join(__dirname, 'views'));

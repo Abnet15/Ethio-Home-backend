@@ -4,71 +4,26 @@ const catchAsync = require('./../utils/catchAsync');
 const AppError = require('./../utils/appError');
 const general = require('./generalControler');
 const Email=require('../utils/email');
-const fs = require('fs');
-const path = require('path');
+const { uploadImage, deleteImage } = require('../utils/cloudinary');
 
-// Ensure uploads directory exists
-const uploadsDir = path.join(__dirname, '../uploads/img/users');
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-}
-
-// Utility function to check if a photo belongs to a specific user
-const isUserPhoto = (photoFilename, userId) => {
-  return photoFilename && photoFilename !== 'default.png' && photoFilename.startsWith(userId + '-');
-};
-
-// Utility function to safely remove user's photo file
-const removeUserPhotoFile = (photoFilename, userId) => {
-  if (!isUserPhoto(photoFilename, userId)) {
-    console.log(`ℹ️ Photo '${photoFilename}' doesn't belong to user ${userId}, skipping file removal`);
-    return false;
-  }
-
-  const photoPath = path.join(__dirname, '../uploads/img/users', photoFilename);
-  
+// Utility function to safely remove user's photo from Cloudinary
+const removeUserPhotoFile = async (photoUrlOrPublicId, userId) => {
   try {
-    if (fs.existsSync(photoPath)) {
-      fs.unlinkSync(photoPath);
-      console.log(`✅ Photo file removed for user ${userId}:`, photoPath);
+    if (!photoUrlOrPublicId || photoUrlOrPublicId === 'default.png') {
+      return false;
+    }
+
+    const result = await deleteImage(photoUrlOrPublicId);
+    if (result.result === 'ok') {
+      console.log(`✅ Photo removed from Cloudinary for user ${userId}`);
       return true;
     } else {
-      console.log(`ℹ️ Photo file not found for user ${userId}:`, photoPath);
+      console.log(`ℹ️ Photo not found in Cloudinary for user ${userId}`);
       return false;
     }
   } catch (error) {
-    console.error(`❌ Error removing photo file for user ${userId}:`, error);
+    console.error(`❌ Error removing photo from Cloudinary for user ${userId}:`, error);
     return false;
-  }
-};
-
-// Utility function to get all photos in the uploads directory
-const getAllPhotosInDirectory = () => {
-  try {
-    if (!fs.existsSync(uploadsDir)) {
-      return [];
-    }
-    return fs.readdirSync(uploadsDir).filter(file => 
-      file !== 'default.png' && file.endsWith('.jpg') || file.endsWith('.jpeg') || file.endsWith('.png') || file.endsWith('.gif')
-    );
-  } catch (error) {
-    console.error('Error reading uploads directory:', error);
-    return [];
-  }
-};
-
-// Utility function to find orphaned photos (photos not associated with any user)
-const findOrphanedPhotos = async () => {
-  try {
-    const allPhotos = getAllPhotosInDirectory();
-    const allUsers = await User.find({}, 'photo');
-    const userPhotos = allUsers.map(u => u.photo).filter(p => p && p !== 'default.png');
-    
-    const orphanedPhotos = allPhotos.filter(photo => !userPhotos.includes(photo));
-    return orphanedPhotos;
-  } catch (error) {
-    console.error('Error finding orphaned photos:', error);
-    return [];
   }
 };
 
@@ -88,20 +43,12 @@ const verifyUserPhotoInDatabase = async (userId) => {
     return false;
   }
 };
-// Use local storage
-  storage = multer.diskStorage({
-    destination: function (req, file, cb) {
-      cb(null, 'uploads/img/users');
-    },
-    filename: function (req, file, cb) {
-      const ex=file.mimetype.split('/')[1];
-      const fileName = `${req.user._id}-${Date.now()}.${ex}`;
-      cb(null, fileName);
-    }
-  });
 
-  // Configure multer
-upload = multer({
+// Use memory storage for Cloudinary uploads
+const storage = multer.memoryStorage();
+
+// Configure multer
+const upload = multer({
   storage: storage,
   fileFilter: (req, file, cb) => {
     if (file.mimetype.startsWith('image/')) {
@@ -133,7 +80,7 @@ exports.updateMe = catchAsync(async (req, res, next) => {
     if (allowedFields.includes(el)) object[el] = req.body[el];
   });
 
-  if (req.file) object.photo = req.file.filename;
+  // Photo upload is handled separately in uploadPhoto endpoint
   const updatedUser = await User.findByIdAndUpdate(req.user.id, object, {
     new: true,
     runValidators: true
@@ -330,15 +277,21 @@ exports.uploadPhoto = catchAsync(async (req, res, next) => {
   // Get current user
   const user = await User.findById(req.user.id);
   
-  // Smart photo management: Only delete user's previous photos
+  // Smart photo management: Only delete user's previous photos from Cloudinary
   if (user.photo && user.photo !== 'default.png') {
-    removeUserPhotoFile(user.photo, req.user._id);
+    await removeUserPhotoFile(user.photo, req.user._id);
   }
 
-  // Update user with new photo in database
+  // Upload photo to Cloudinary
+  const timestamp = Date.now();
+  const publicId = `users/${req.user._id}-${timestamp}`;
+  const uploadResult = await uploadImage(req.file.buffer, 'users', publicId);
+  const photoUrl = uploadResult.secure_url;
+
+  // Update user with new photo URL in database
   const updatedUser = await User.findByIdAndUpdate(
     req.user.id,
-    { photo: req.file.filename },
+    { photo: photoUrl },
     { new: true, runValidators: true }
   );
   console.log("updatedUser😎😎😎😎",updatedUser);
@@ -348,14 +301,12 @@ exports.uploadPhoto = catchAsync(async (req, res, next) => {
     return next(new AppError('Failed to update user photo in database', 500));
   }
 
-  console.log(`✅ Photo uploaded successfully for user ${req.user._id}:`, req.file.filename);
+  console.log(`✅ Photo uploaded successfully to Cloudinary for user ${req.user._id}`);
   console.log(`✅ Database updated - User photo field:`, updatedUser.photo);
 
   // Verify database update was successful
   await verifyUserPhotoInDatabase(req.user._id);
 
-  // Return the photo URL for frontend use (correct path)
-  const photoUrl = `http://127.0.0.1:5000/img/users/${req.file.filename}`;
   console.log("photoUrl",photoUrl);
 
   res.status(200).json({
@@ -376,8 +327,8 @@ exports.removePhoto = catchAsync(async (req, res, next) => {
     return next(new AppError('No photo to remove', 400));
   }
 
-  // Only remove photo if it belongs to this user
-  removeUserPhotoFile(user.photo, req.user._id);
+  // Remove photo from Cloudinary
+  await removeUserPhotoFile(user.photo, req.user._id);
 
   // Update user to set default photo in database
   const updatedUser = await User.findByIdAndUpdate(
@@ -391,7 +342,7 @@ exports.removePhoto = catchAsync(async (req, res, next) => {
     return next(new AppError('Failed to update user photo in database', 500));
   }
 
-  console.log(`✅ Photo removed successfully for user ${req.user._id}`);
+  console.log(`✅ Photo removed successfully from Cloudinary for user ${req.user._id}`);
   console.log(`✅ Database updated - User photo field:`, updatedUser.photo);
 
   // Verify database update was successful
@@ -413,28 +364,20 @@ exports.cleanupOrphanedPhotos = catchAsync(async (req, res, next) => {
     return next(new AppError('Only admins can perform this action', 403));
   }
 
-  const orphanedPhotos = await findOrphanedPhotos();
-  let removedCount = 0;
-
-  for (const photo of orphanedPhotos) {
-    const photoPath = path.join(uploadsDir, photo);
-    try {
-      if (fs.existsSync(photoPath)) {
-        fs.unlinkSync(photoPath);
-        removedCount++;
-        console.log(`🗑️ Orphaned photo removed:`, photo);
-      }
-    } catch (error) {
-      console.error(`❌ Error removing orphaned photo ${photo}:`, error);
-    }
-  }
+  // Get all users and their photos
+  const allUsers = await User.find({}, 'photo');
+  const userPhotos = allUsers.map(u => u.photo).filter(p => p && p !== 'default.png');
+  
+  // Note: Cloudinary cleanup would require listing all images in the folder
+  // This is a simplified version - in production, you might want to use Cloudinary Admin API
+  // to list all images in the 'users' folder and compare with database
 
   res.status(200).json({
     status: 'success',
-    message: `Cleanup completed. ${removedCount} orphaned photos removed.`,
+    message: `Cleanup check completed. Found ${userPhotos.length} user photos in database.`,
     data: {
-      orphanedPhotosFound: orphanedPhotos.length,
-      photosRemoved: removedCount
+      totalPhotosInDatabase: userPhotos.length,
+      note: 'Cloudinary cleanup requires Admin API access to list all images in folder'
     }
   });
 });
@@ -454,13 +397,14 @@ exports.getUserPhotoStatus = catchAsync(async (req, res, next) => {
       return next(new AppError('User not found', 404));
     }
 
-    // Check if photo file exists
+    // Check if photo is a Cloudinary URL
     let photoFileExists = false;
     let photoFilePath = '';
     
     if (user.photo && user.photo !== 'default.png') {
-      photoFilePath = path.join(uploadsDir, user.photo);
-      photoFileExists = fs.existsSync(photoFilePath);
+      photoFilePath = user.photo;
+      // If it's a Cloudinary URL, consider it as existing
+      photoFileExists = user.photo.startsWith('http://') || user.photo.startsWith('https://');
     }
 
     res.status(200).json({
@@ -477,7 +421,7 @@ exports.getUserPhotoStatus = catchAsync(async (req, res, next) => {
           photoFileExists: photoFileExists,
           photoFilePath: photoFilePath,
           isDefaultPhoto: user.photo === 'default.png',
-          belongsToUser: isUserPhoto(user.photo, userId)
+          isCloudinaryUrl: user.photo && (user.photo.startsWith('http://') || user.photo.startsWith('https://'))
         }
       }
     });

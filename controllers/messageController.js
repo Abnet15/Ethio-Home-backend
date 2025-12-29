@@ -293,19 +293,32 @@ exports.getMessage = catchAsync(async (req, res, next) => {
 
 // Mark message as read
 exports.markAsRead = catchAsync(async (req, res, next) => {
-  const message = await Message.findById(req.params.id);
+  const message = await Message.findById(req.params.id)
+    .populate('sender', 'name email photo')
+    .populate('recipient', 'name email photo');
 
   if (!message) {
     return next(new AppError('Message not found', 404));
   }
 
   // Check if user is the recipient
-  if (message.recipient.toString() !== req.user._id.toString()) {
+  if (message.recipient._id.toString() !== req.user._id.toString()) {
     return next(new AppError('You can only mark messages you received as read', 403));
   }
 
   message.isRead = true;
+  message.readAt = new Date();
   await message.save();
+
+  // Emit read receipt to sender
+  if (global.io) {
+    const senderId = message.sender._id.toString();
+    global.io.to(senderId).emit('message:read', {
+      messageId: message._id,
+      readBy: req.user._id.toString(),
+      readAt: message.readAt
+    });
+  }
 
   res.status(200).json({
     status: 'success',
@@ -595,6 +608,14 @@ exports.updateMessage = catchAsync(async (req, res, next) => {
    .populate('recipient', 'name email photo')
    .populate('relatedProperty', 'title location price');
 
+  // Emit realtime updates
+  if (global.io) {
+    const recipientId = updatedMessage.recipient._id.toString();
+    const senderId = updatedMessage.sender._id.toString();
+    if (recipientId) global.io.to(recipientId).emit('message:updated', updatedMessage);
+    if (senderId) global.io.to(senderId).emit('message:updated', updatedMessage);
+  }
+
   res.status(200).json({
     status: 'success',
     data: {
@@ -633,8 +654,18 @@ exports.deleteMessage = catchAsync(async (req, res, next) => {
     }
   }
 
+  // Get message details before deletion for socket notification
+  const recipientId = message.recipient.toString();
+  const senderId = message.sender.toString();
+
   // Delete the message
   await Message.findByIdAndDelete(req.params.id);
+
+  // Emit realtime updates
+  if (global.io) {
+    if (recipientId) global.io.to(recipientId).emit('message:deleted', { messageId: req.params.id });
+    if (senderId) global.io.to(senderId).emit('message:deleted', { messageId: req.params.id });
+  }
 
   res.status(204).json({
     status: 'success',
@@ -703,7 +734,10 @@ exports.replyToMessage = catchAsync(async (req, res, next) => {
   }
 
   // Get the original message
-  const originalMessage = await Message.findById(messageId);
+  const originalMessage = await Message.findById(messageId)
+    .populate('sender', 'name email photo')
+    .populate('recipient', 'name email photo');
+    
   if (!originalMessage) {
     return next(new AppError('Original message not found', 404));
   }
@@ -731,6 +765,14 @@ exports.replyToMessage = catchAsync(async (req, res, next) => {
   await replyMessage.populate('recipient', 'name email photo');
   if (originalMessage.relatedProperty) {
     await replyMessage.populate('relatedProperty', 'title location price');
+  }
+
+  // Emit realtime updates
+  if (global.io) {
+    const recipientIdStr = recipientId.toString();
+    const senderIdStr = req.user._id.toString();
+    if (recipientIdStr) global.io.to(recipientIdStr).emit('message:new', replyMessage);
+    if (senderIdStr) global.io.to(senderIdStr).emit('message:new', replyMessage);
   }
 
   res.status(201).json({
@@ -764,6 +806,13 @@ exports.markMultipleAsRead = catchAsync(async (req, res, next) => {
     return next(new AppError('Message IDs array is required', 400));
   }
 
+  // Get messages before updating to emit socket events
+  const messages = await Message.find({
+    _id: { $in: messageIds },
+    recipient: req.user._id
+  }).populate('sender', 'name email photo');
+
+  // Mark multiple messages as read
   const result = await Message.updateMany(
     {
       _id: { $in: messageIds },
@@ -774,6 +823,24 @@ exports.markMultipleAsRead = catchAsync(async (req, res, next) => {
       readAt: new Date()
     }
   );
+
+  // Emit read receipts to senders
+  if (global.io && messages.length > 0) {
+    const senderIds = new Set();
+    messages.forEach(message => {
+      if (message.sender && message.sender._id) {
+        senderIds.add(message.sender._id.toString());
+      }
+    });
+    
+    senderIds.forEach(senderId => {
+      global.io.to(senderId).emit('messages:read', {
+        messageIds: messageIds,
+        readBy: req.user._id.toString(),
+        readAt: new Date()
+      });
+    });
+  }
 
   res.status(200).json({
     status: 'success',

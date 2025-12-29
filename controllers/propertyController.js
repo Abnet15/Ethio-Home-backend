@@ -5,64 +5,34 @@ const AppError=require('../utils/appError');
 const CatchAsync=require('../utils/catchAsync');
 const generalControler=require('./generalControler');
 const SubscriptionPlan = require('../models/SubscriptionPlanModel');
-const fs = require('fs');
-const path = require('path');
+const { uploadImage, deleteImage } = require('../utils/cloudinary');
 
-// Ensure uploads directory exists
-const uploadsDir = path.join(__dirname, '../uploads/img/properties');
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-}
-
-// Utility function to check if a property image belongs to a specific property
-const isPropertyImage = (imageFilename, propertyId) => {
-  return imageFilename && imageFilename.startsWith(propertyId + '-');
-};
-
-// Utility function to safely remove property image file
-const removePropertyImageFile = (imageFilename, propertyId) => {
-  if (!isPropertyImage(imageFilename, propertyId)) {
-    console.log(`ℹ️ Image '${imageFilename}' doesn't belong to property ${propertyId}, skipping file removal`);
-    return false;
-  }
-
-  const imagePath = path.join(__dirname, '../uploads/img/properties', imageFilename);
-  
+// Utility function to safely remove property image from Cloudinary
+const removePropertyImageFile = async (imageUrlOrPublicId, propertyId) => {
   try {
-    if (fs.existsSync(imagePath)) {
-      fs.unlinkSync(imagePath);
-      console.log(`✅ Property image file removed for property ${propertyId}:`, imagePath);
+    if (!imageUrlOrPublicId) {
+      return false;
+    }
+
+    const result = await deleteImage(imageUrlOrPublicId);
+    if (result.result === 'ok') {
+      console.log(`✅ Property image removed from Cloudinary for property ${propertyId}`);
       return true;
     } else {
-      console.log(`ℹ️ Property image file not found for property ${propertyId}:`, imagePath);
+      console.log(`ℹ️ Property image not found in Cloudinary for property ${propertyId}`);
       return false;
     }
   } catch (error) {
-    console.error(`❌ Error removing property image file for property ${propertyId}:`, error);
+    console.error(`❌ Error removing property image from Cloudinary for property ${propertyId}:`, error);
     return false;
   }
 };
 
-// Use local storage
-  storage = multer.diskStorage({
-    destination: function (req, file, cb) {
-      // Ensure directory exists
-      if (!fs.existsSync(uploadsDir)) {
-        fs.mkdirSync(uploadsDir, { recursive: true });
-      }
-      cb(null, uploadsDir);
-    },
-    filename: function (req, file, cb) {
-      const ex=file.mimetype.split('/')[1];
-      // Use Date.now() for precise timestamp ordering
-      const timestamp = Date.now();
-      const fileName = `${req.params.id}-${req.user._id}-${timestamp}.${ex}`;
-      cb(null, fileName);
-    }
-  });
+// Use memory storage for Cloudinary uploads
+const storage = multer.memoryStorage();
 
-  // Configure multer
-upload = multer({
+// Configure multer
+const upload = multer({
   storage: storage,
   fileFilter: (req, file, cb) => {
     if (file.mimetype.startsWith('image/')) {
@@ -121,38 +91,39 @@ exports.uploadPropertyImages = CatchAsync(async (req, res, next) => {
     // Calculate how many old images to remove
     const imagesToRemove = totalImagesAfterUpload - 6;
     
-    // Sort images by timestamp (oldest first) and remove the oldest ones
+    // Sort images by creation time (oldest first) and remove the oldest ones
     if (property.images && property.images.length > 0) {
-      const sortedImages = property.images.map(filename => {
-        // Extract timestamp from filename: {propertyId}-{userId}-{timestamp}.{extension}
-        const parts = filename.split('-');
-        if (parts.length >= 3) {
-          const timestamp = parseInt(parts[2].split('.')[0]);
-          return { filename, timestamp };
-        }
-        return { filename, timestamp: 0 }; // Fallback for old naming
-      }).sort((a, b) => a.timestamp - b.timestamp);
+      // For Cloudinary URLs, we'll remove the oldest ones based on array order
+      const imagesToDelete = property.images.slice(0, imagesToRemove);
       
-      // Remove oldest images
-      for (let i = 0; i < imagesToRemove; i++) {
-        const oldestImage = sortedImages[i];
-        removePropertyImageFile(oldestImage.filename, req.params.id);
-        console.log(`🗑️ Removed oldest image to maintain limit: ${oldestImage.filename}`);
+      // Remove oldest images from Cloudinary
+      for (const imageUrl of imagesToDelete) {
+        await removePropertyImageFile(imageUrl, req.params.id);
+        console.log(`🗑️ Removed oldest image to maintain limit: ${imageUrl}`);
       }
       
       // Keep only the newest images
-      property.images = sortedImages.slice(imagesToRemove).map(img => img.filename);
+      property.images = property.images.slice(imagesToRemove);
     }
   }
 
+  // Upload images to Cloudinary
+  const uploadPromises = req.files.map(async (file) => {
+    const timestamp = Date.now();
+    const publicId = `properties/${req.params.id}-${req.user._id}-${timestamp}`;
+    const result = await uploadImage(file.buffer, 'properties', publicId);
+    return result.secure_url; // Store the Cloudinary URL
+  });
+
+  const uploadedImageUrls = await Promise.all(uploadPromises);
+
   // Add new images to property
-  const newImageFilenames = req.files.map(file => file.filename);
-  property.images = property.images ? [...property.images, ...newImageFilenames] : newImageFilenames;
+  property.images = property.images ? [...property.images, ...uploadedImageUrls] : uploadedImageUrls;
 
   // Save updated property
   const updatedProperty = await property.save();
 
-  console.log(`✅ ${req.files.length} images uploaded successfully for property ${req.params.id}:`, newImageFilenames);
+  console.log(`✅ ${req.files.length} images uploaded successfully to Cloudinary for property ${req.params.id}`);
   if (totalImagesAfterUpload > 6) {
     console.log(`ℹ️ ${totalImagesAfterUpload - 6} oldest images were automatically removed to maintain the 6-image limit`);
   }
@@ -160,9 +131,7 @@ exports.uploadPropertyImages = CatchAsync(async (req, res, next) => {
   // Return the updated property with image URLs
   const propertyWithUrls = {
     ...updatedProperty.toObject(),
-    imagesUrl: updatedProperty.images.map(file => {
-      return `http://127.0.0.1:5000/img/properties/${file}`;
-    })
+    imagesUrl: updatedProperty.images
   };
 
   res.status(200).json({
@@ -170,7 +139,7 @@ exports.uploadPropertyImages = CatchAsync(async (req, res, next) => {
     message: 'Images uploaded successfully',
     data: {
       property: propertyWithUrls,
-      imagesUploaded: newImageFilenames,
+      imagesUploaded: uploadedImageUrls,
       imagesRemoved: totalImagesAfterUpload > 6 ? totalImagesAfterUpload - 6 : 0
     }
   });
@@ -208,11 +177,11 @@ exports.removePropertyImage = CatchAsync(async (req, res, next) => {
     return next(new AppError('Image index out of range', 400));
   }
 
-  // Get the image filename to remove
+  // Get the image URL to remove
   const imageToRemove = property.images[imageIndex];
   
-  // Remove the image file from storage
-  removePropertyImageFile(imageToRemove, req.params.id);
+  // Remove the image from Cloudinary
+  await removePropertyImageFile(imageToRemove, req.params.id);
 
   // Remove the image from the property's images array
   property.images.splice(imageIndex, 1);
@@ -220,14 +189,12 @@ exports.removePropertyImage = CatchAsync(async (req, res, next) => {
   // Save updated property
   const updatedProperty = await property.save();
 
-  console.log(`✅ Image removed successfully for property ${req.params.id}:`, imageToRemove);
+  console.log(`✅ Image removed successfully from Cloudinary for property ${req.params.id}:`, imageToRemove);
 
   // Return the updated property with image URLs
   const propertyWithUrls = {
     ...updatedProperty.toObject(),
-    imagesUrl: updatedProperty.images.map(file => {
-      return `http://127.0.0.1:5000/img/properties/${file}`;
-    })
+    imagesUrl: updatedProperty.images
   };
 
   res.status(200).json({
@@ -248,35 +215,19 @@ exports.cleanupOrphanedPropertyImages = CatchAsync(async (req, res, next) => {
   }
 
   try {
-    const allImages = fs.readdirSync(uploadsDir).filter(file => 
-      file.endsWith('.jpg') || file.endsWith('.jpeg') || file.endsWith('.png') || file.endsWith('.gif')
-    );
-
     const allProperties = await Property.find({}, 'images');
     const propertyImages = allProperties.flatMap(p => p.images || []);
     
-    const orphanedImages = allImages.filter(image => !propertyImages.includes(image));
-    let removedCount = 0;
-
-    for (const image of orphanedImages) {
-      const imagePath = path.join(uploadsDir, image);
-      try {
-        if (fs.existsSync(imagePath)) {
-          fs.unlinkSync(imagePath);
-          removedCount++;
-          console.log(`🗑️ Orphaned property image removed:`, image);
-        }
-      } catch (error) {
-        console.error(`❌ Error removing orphaned property image ${image}:`, error);
-      }
-    }
-
+    // Note: Cloudinary cleanup would require listing all images in the folder
+    // This is a simplified version - in production, you might want to use Cloudinary Admin API
+    // to list all images in the 'properties' folder and compare with database
+    
     res.status(200).json({
       status: 'success',
-      message: `Cleanup completed. ${removedCount} orphaned property images removed.`,
+      message: `Cleanup check completed. Found ${propertyImages.length} property images in database.`,
       data: {
-        orphanedImagesFound: orphanedImages.length,
-        imagesRemoved: removedCount
+        totalImagesInDatabase: propertyImages.length,
+        note: 'Cloudinary cleanup requires Admin API access to list all images in folder'
       }
     });
   } catch (error) {
@@ -481,15 +432,10 @@ exports.getPropertiesBySeller = CatchAsync(async (req, res, next) => {
     const properties = await query;
     const total = await Property.countDocuments({ owner: ownerId });
 
-    // Add image URLs
+    // Add image URLs (already Cloudinary URLs)
     const propertiesWithUrls = properties.map(property => ({
       ...property.toObject(),
-      imagesUrl: property.images.map(file => {
-        if (file.startsWith('http://') || file.startsWith('https://')) {
-          return file;
-        }
-        return `http://127.0.0.1:5000/img/properties/${file}`;
-      })
+      imagesUrl: property.images || []
     }));
 
     res.status(200).json({
