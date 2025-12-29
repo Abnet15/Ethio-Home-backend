@@ -1,6 +1,5 @@
 const CatchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/appError');
-const { isConnected, executeWithTimeout } = require('../utils/dbConnection');
 const Property=require('../models/propertyModel');
 const Selling = require('../models/sellingModel');
 const User= require('../models/userModel');
@@ -190,11 +189,6 @@ exports.getOne = (Model, Options) =>
 exports.getAll = Model =>
   CatchAsync(async (req, res,next) => {
     try {
-      // Check MongoDB connection state
-      if (!isConnected()) {
-        throw new AppError('Database connection is not ready. Please try again in a moment.', 503);
-      }
-
       // To allow for nested for reviews route
       let filter = {};
       if (`req.params.${Model}Id`) filter = { Model: `req.params.${Model}Id` };
@@ -235,36 +229,12 @@ exports.getAll = Model =>
       throw new AppError('page number must be greater than 0',404);
     }
   
-    // Use countDocuments with the same filter for accurate count
-    let countQuery;
-    if(Model.modelName ==='Property'){
-      countQuery = Model.countDocuments(queryObj);
-    } else {
-      countQuery = Model.countDocuments(queryObj);
-    }
-    
-    // Execute count with timeout handling
-    const total = await executeWithTimeout(
-      () => countQuery,
-      15000
-    ).catch((err) => {
-      console.error(`CountDocuments error for ${Model.modelName}:`, err);
-      // Return 0 if count fails, but still try to get the documents
-      return 0;
-    });
-    
+    const total = await Model.countDocuments();
     if(req.query.page){
-      if(skip>=total && total > 0) throw new AppError('the page is does not exist.',404);
+      if(skip>=total) throw new AppError('the page is does not exist.',404);
     }
   
-    // Execute query with timeout handling
-    let doc = await executeWithTimeout(
-      () => query.exec(),
-      20000
-    ).catch((err) => {
-      console.error(`Query execution error for ${Model.modelName}:`, err);
-      throw new AppError(`Failed to fetch ${Model.modelName} data: ${err.message}`, 500);
-    });
+    let doc = await query;
 
  if(Model.modelName ==='Property'){
       doc=doc.map(el=>({
@@ -298,18 +268,6 @@ exports.getAll = Model =>
       });
     } catch (error) {
       console.error(`Error in getAll for ${Model.modelName}:`, error);
-      
-      // Check if it's a MongoDB connection error
-      if (error.name === 'MongoServerSelectionError' || 
-          error.name === 'MongoNetworkError' ||
-          error.message.includes('buffering timed out') ||
-          error.message.includes('connection')) {
-        return next(new AppError(
-          `Database connection error. Please check your MongoDB connection and try again.`, 
-          503
-        ));
-      }
-      
       return next(new AppError(`Failed to fetch ${Model.modelName} data: ${error.message}`, 500));
     }
   });

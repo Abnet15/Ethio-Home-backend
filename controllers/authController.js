@@ -6,9 +6,9 @@ const catchAsync = require('./../utils/catchAsync');
 const AppError = require('./../utils/appError');
 const Email = require('./../utils/email');
 
-const createSendToken = (user, statusCode, req, res) => {
+const createSendToken = (user, statusCode, req, res,next) => {
   //console.log(user.verificationToken);
-  if(!user.isVerified) throw  new AppError('please verify your email',400);
+  if(!user.isVerified) return next(new AppError('please verify your email',400));
   const token = jwt.sign({ id: user._id}, process.env.JWT_SECRET, {
     expiresIn: process.env.JWT_EXPIRES_IN
   });
@@ -86,7 +86,7 @@ exports.verifyEmail= catchAsync( async (req, res, next )=>{
   user.isVerified=true;
   await user.save({validateBeforeSave: false});
 
-  createSendToken(user, 201, req, res);
+  createSendToken(user, 201, req, res,next);
 });
 
 exports.login = catchAsync(async (req, res, next) => {
@@ -97,13 +97,15 @@ exports.login = catchAsync(async (req, res, next) => {
   }
   // Check if user exists && password is correct
   const user = await User.findOne({ email }).select('+password');
-  //console.log(user)
-
+ /*  user.isVerified=true;
+  user.save({validateBeforeSave: false});
+  console.log(user) */
+  
   if (!user || !(await user.checkPassword(password, user.password))) {
     return next(new AppError('Incorrect email or password', 401));
   }
   
-  createSendToken(user, 200, req, res);
+  createSendToken(user, 200, req, res, next);
 });
 
 exports.logout = (req, res) => {
@@ -206,7 +208,7 @@ exports.resetPassword = catchAsync(async (req, res, next) => {
   user.passwordResetExpires = undefined;
   await user.save();
 
-  createSendToken(user, 200, req, res);
+  createSendToken(user, 200, req, res,next);
 });
 
 exports.updatePassword = catchAsync(async (req, res, next) => {
@@ -224,5 +226,5 @@ exports.updatePassword = catchAsync(async (req, res, next) => {
   await user.save();
   await new Email(user).updatePassword();
 
-  createSendToken(user, 200, req, res);
+  createSendToken(user, 200, req, res,next);
 });

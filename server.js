@@ -1,6 +1,8 @@
 require('dotenv').config({ path: './config.env' });
 const path=require('path');
 const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -30,6 +32,30 @@ process.on('uncaughtException', (err) => {
 });
 
 const app = express();
+const server = http.createServer(app);
+
+// Socket.io setup for realtime messaging
+const io = new Server(server, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"],
+    credentials: true,
+  },
+});
+
+global.io = io;
+
+io.on('connection', (socket) => {
+  const userId = socket.handshake.query.userId;
+  if (userId) {
+    socket.join(userId);
+    console.log(`Socket connected for user ${userId}`);
+  }
+
+  socket.on('disconnect', () => {
+    if (userId) console.log(`Socket disconnected for user ${userId}`);
+  });
+});
 
 app.set('view engine', 'pug');
 app.set('views', path.join(__dirname, 'views'));
@@ -136,74 +162,24 @@ app.all('*',(req, res, next) => {
 app.use(globalErrorHandler);
 
 // Connect to MongoDB
-// Use DATABASE (MongoDB Atlas) if available, otherwise fall back to MONGODB_URI
-const dbURI = process.env.DATABASE || process.env.MONGODB_URI;
-
-if (!dbURI) {
-  console.error('Neither DATABASE nor MONGODB_URI is defined in environment variables!');
-  process.exit(1);
-}
-
-// Log which connection string is being used (without credentials)
-const dbInfo = dbURI.includes('@') 
-  ? dbURI.split('@')[1] 
-  : dbURI;
-console.log('Using MongoDB connection:', dbInfo);
-
-// MongoDB connection options (Mongoose 7.x compatible)
-// Note: useNewUrlParser and useUnifiedTopology are deprecated in Mongoose 7.x
-// bufferMaxEntries and bufferCommands are not supported in Mongoose 7.x
-const mongooseOptions = {
-  serverSelectionTimeoutMS: 30000, // 30 seconds
-  socketTimeoutMS: 45000, // 45 seconds
-  connectTimeoutMS: 30000, // 30 seconds
-  maxPoolSize: 10, // Maintain up to 10 socket connections
-  minPoolSize: 2, // Maintain at least 2 socket connections
-  maxIdleTimeMS: 30000, // Close connections after 30 seconds of inactivity
-  retryWrites: true,
-  w: 'majority'
-};
-
-mongoose.connect(dbURI, mongooseOptions)
+const dbURI = process.env.MONGODB_URI;
+mongoose.connect(dbURI, {
+  useNewUrlParser: true,
+  useUnifiedTopology: true
+})
 .then(() => {
   console.log('DB connection successful!');
-  console.log('Connected to MongoDB');
-  // Don't log the full URI for security
-  if (dbURI.includes('@')) {
-    const dbName = dbURI.split('/').pop().split('?')[0];
-    console.log('Database:', dbName);
-  }
+  console.log('Connected to:', dbURI);
 })
 .catch((err) => {
-  console.error('MongoDB connection error:', err.message);
+  console.error('MongoDB connection error:', err);
   console.error('Please check your database connection and try again.');
-  console.error('Make sure MONGODB_URI is correctly set in config.env');
   process.exit(1);
-});
-
-// Handle connection events
-mongoose.connection.on('connected', () => {
-  console.log('Mongoose connected to MongoDB');
-});
-
-mongoose.connection.on('error', (err) => {
-  console.error('Mongoose connection error:', err);
-});
-
-mongoose.connection.on('disconnected', () => {
-  console.warn('Mongoose disconnected from MongoDB');
-});
-
-// Graceful shutdown
-process.on('SIGINT', async () => {
-  await mongoose.connection.close();
-  console.log('MongoDB connection closed through app termination');
-  process.exit(0);
 });
 
 // Start server
 const PORT = process.env.PORT || 5000;
-const server= app.listen(PORT, () => {
+server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}...`);
 });
 

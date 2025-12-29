@@ -176,6 +176,14 @@ exports.createMessage = catchAsync(async (req, res, next) => {
     await message.populate('relatedProperty', 'title location price');
   }
 
+  // Emit realtime updates
+  if (global.io) {
+    const recipientId = message.recipient?._id?.toString?.();
+    const senderId = message.sender?._id?.toString?.();
+    if (recipientId) global.io.to(recipientId).emit('message:new', message);
+    if (senderId) global.io.to(senderId).emit('message:new', message);
+  }
+
   res.status(201).json({
     status: 'success',
     data: {
@@ -234,6 +242,13 @@ exports.createPropertyMessage = catchAsync(async (req, res, next) => {
   await message.populate('sender', 'name email photo');
   await message.populate('recipient', 'name email photo');
   await message.populate('relatedProperty', 'title location price');
+
+  if (global.io) {
+    const recipientRoom = recipientId?.toString?.();
+    const senderRoom = req.user?._id?.toString?.();
+    if (recipientRoom) global.io.to(recipientRoom).emit('message:new', message);
+    if (senderRoom) global.io.to(senderRoom).emit('message:new', message);
+  }
 
   res.status(201).json({
     status: 'success',

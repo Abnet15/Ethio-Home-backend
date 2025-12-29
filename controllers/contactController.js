@@ -9,14 +9,14 @@ const NotificationService = require('./../services/notificationService');
 // Submit contact form (public)
 exports.submitContact = catchAsync(async (req, res, next) => {
   let { name, email, phone, subject, message, inquiryType, sender } = req.body;
-  const objectId = new mongoose.Types.ObjectId(sender);
 
   // Validate required fields
-  if (!name || !email || !message || !sender) {
-    return next(new AppError('Name, email, message, and sender are required', 400));
+  if (!name || !email || !message) {
+    return next(new AppError('Name, email, and message are required', 400));
   }
+
   // Create contact inquiry
-  const contact = await Contact.create({
+  const contactData = {
     name,
     email,
     phone,
@@ -25,8 +25,16 @@ exports.submitContact = catchAsync(async (req, res, next) => {
     inquiryType: inquiryType || 'general',
     status: 'new',
     priority: 'medium',
-    sender: objectId
-  });
+    ipAddress: req.ip,
+    userAgent: req.get('user-agent')
+  };
+
+  // Only add sender if provided and valid
+  if (sender && mongoose.Types.ObjectId.isValid(sender)) {
+    contactData.sender = new mongoose.Types.ObjectId(sender);
+  }
+
+  const contact = await Contact.create(contactData);
 
   res.status(201).json({
     status: 'success',
@@ -69,20 +77,24 @@ exports.getAllContacts = catchAsync(async (req, res, next) => {
 
 // Get contact by ID (admin/employee)
 exports.getContact = catchAsync(async (req, res, next) => {
-  try {
-    let contact;
+  let contact;
 
-  if(req.user.role == 'admin' || req.user.role == 'employee') {
-    contact = await Contact.find({sender: req.user._id})
-    .populate('assignedTo', 'name email')
-    .populate('respondedBy', 'name email')
-    .populate('notes.addedBy', 'name email');
-
-  }else{
-     contact= await Contact.find({sender: req.user._id})
-    .populate('assignedTo', 'name email')
-    .populate('respondedBy', 'name email')
-    .populate('notes.addedBy', 'name email');
+  // Admin and employee can see any contact by ID
+  if (req.user.role === 'admin' || req.user.role === 'employee') {
+    contact = await Contact.findById(req.params.id)
+      .populate('assignedTo', 'name email')
+      .populate('respondedBy', 'name email')
+      .populate('notes.addedBy', 'name email')
+      .populate('sender', 'name email');
+  } else {
+    // Regular users can only see their own contacts
+    contact = await Contact.findOne({
+      _id: req.params.id,
+      sender: req.user._id
+    })
+      .populate('assignedTo', 'name email')
+      .populate('respondedBy', 'name email')
+      .populate('notes.addedBy', 'name email');
   }
 
   if (!contact) {
@@ -102,10 +114,6 @@ exports.getContact = catchAsync(async (req, res, next) => {
       }
     }
   });
-  }catch(error){
-  console.error('Error fetching contact:', error);
-  return next(new AppError('Error fetching contact', 500));
-} 
 });
 
 // Update contact status and respond (admin/employee)

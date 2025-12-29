@@ -4,13 +4,16 @@ const contactSchema = new mongoose.Schema({
   name: {
     type: String,
     required: [true, 'Name is required'],
-    trim: true
+    trim: true,
+    minlength: [2, 'Name must be at least 2 characters'],
+    maxlength: [100, 'Name cannot exceed 100 characters']
   },
   email: {
     type: String,
     required: [true, 'Email is required'],
     lowercase: true,
-    trim: true
+    trim: true,
+    match: [/^\S+@\S+\.\S+$/, 'Please provide a valid email address']
   },
   phone: {
     type: String,
@@ -23,7 +26,9 @@ const contactSchema = new mongoose.Schema({
   message: {
     type: String,
     required: [true, 'Message is required'],
-    trim: true
+    trim: true,
+    minlength: [10, 'Message must be at least 10 characters'],
+    maxlength: [5000, 'Message cannot exceed 5000 characters']
   },
   inquiryType: {
     type: String,
@@ -51,7 +56,7 @@ const contactSchema = new mongoose.Schema({
   sender: {
     type: mongoose.Schema.ObjectId,
     ref: 'User',
-    required: [true, 'User is required']
+    required: false
   },
   respondedBy: {
     type: mongoose.Schema.ObjectId,
