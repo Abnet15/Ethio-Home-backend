@@ -2,11 +2,19 @@ const { v2: cloudinary } = require('cloudinary');
 const streamifier = require('streamifier');
 
 // Configure Cloudinary
-cloudinary.config({
+const cloudinaryConfig = {
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME || 'dhq297cwg',
   api_key: process.env.CLOUDINARY_API_KEY || '361271383315379',
-  api_secret: process.env.CLOUDINARY_API_SECRET || '<your_api_secret>' // REQUIRED: Set this in your config.env file
-});
+  api_secret: process.env.CLOUDINARY_API_SECRET // Set in config.env file
+};
+
+// Validate Cloudinary configuration
+if (!cloudinaryConfig.api_secret) {
+  console.error('⚠️ WARNING: CLOUDINARY_API_SECRET is not set in environment variables!');
+  console.error('⚠️ Cloudinary uploads will fail without a valid API secret.');
+}
+
+cloudinary.config(cloudinaryConfig);
 
 /**
  * Upload an image buffer to Cloudinary
@@ -17,6 +25,20 @@ cloudinary.config({
  */
 const uploadImage = (buffer, folder, publicId = null) => {
   return new Promise((resolve, reject) => {
+    // Validate inputs
+    if (!buffer || !Buffer.isBuffer(buffer)) {
+      return reject(new Error('Invalid buffer provided for upload'));
+    }
+
+    if (!folder) {
+      return reject(new Error('Folder is required for upload'));
+    }
+
+    // Validate Cloudinary configuration
+    if (!cloudinaryConfig.api_secret) {
+      return reject(new Error('Cloudinary API secret is not configured'));
+    }
+
     const uploadOptions = {
       folder: folder,
       resource_type: 'image',
@@ -33,12 +55,22 @@ const uploadImage = (buffer, folder, publicId = null) => {
       uploadOptions,
       (error, result) => {
         if (error) {
+          console.error('Cloudinary upload error:', error);
           reject(error);
+        } else if (!result || !result.secure_url) {
+          console.error('Cloudinary upload succeeded but no secure_url in result:', result);
+          reject(new Error('Upload succeeded but no URL returned from Cloudinary'));
         } else {
           resolve(result);
         }
       }
     );
+
+    // Handle stream errors
+    uploadStream.on('error', (error) => {
+      console.error('Cloudinary stream error:', error);
+      reject(error);
+    });
 
     streamifier.createReadStream(buffer).pipe(uploadStream);
   });

@@ -260,63 +260,88 @@ exports.updateUserPassword = catchAsync(async (req, res, next) => {
 });
 // Photo upload endpoint
 exports.uploadPhoto = catchAsync(async (req, res, next) => {
-  if (!req.file) {
-    return next(new AppError('Please upload a photo', 400));
-  }
-
-  // Validate file type
-  if (!req.file.mimetype.startsWith('image/')) {
-    return next(new AppError('Invalid file type. Only images are allowed.', 400));
-  }
-
-  // Validate file size (additional check)
-  if (req.file.size > 5 * 1024 * 1024) {
-    return next(new AppError('File size too large. Maximum size is 5MB.', 400));
-  }
-
-  // Get current user
-  const user = await User.findById(req.user.id);
-  
-  // Smart photo management: Only delete user's previous photos from Cloudinary
-  if (user.photo && user.photo !== 'default.png') {
-    await removeUserPhotoFile(user.photo, req.user._id);
-  }
-
-  // Upload photo to Cloudinary
-  const timestamp = Date.now();
-  const publicId = `users/${req.user._id}-${timestamp}`;
-  const uploadResult = await uploadImage(req.file.buffer, 'users', publicId);
-  const photoUrl = uploadResult.secure_url;
-
-  // Update user with new photo URL in database
-  const updatedUser = await User.findByIdAndUpdate(
-    req.user.id,
-    { photo: photoUrl },
-    { new: true, runValidators: true }
-  );
-  console.log("updatedUser😎😎😎😎",updatedUser);
-
-  // Verify database update was successful
-  if (!updatedUser) {
-    return next(new AppError('Failed to update user photo in database', 500));
-  }
-
-  console.log(`✅ Photo uploaded successfully to Cloudinary for user ${req.user._id}`);
-  console.log(`✅ Database updated - User photo field:`, updatedUser.photo);
-
-  // Verify database update was successful
-  await verifyUserPhotoInDatabase(req.user._id);
-
-  console.log("photoUrl",photoUrl);
-
-  res.status(200).json({
-    status: 'success',
-    message: 'Photo uploaded successfully',
-    data: {
-      user: updatedUser,
-      photoUrl: photoUrl
+  try {
+    if (!req.file) {
+      return next(new AppError('Please upload a photo', 400));
     }
-  });
+
+    // Validate file type
+    if (!req.file.mimetype.startsWith('image/')) {
+      return next(new AppError('Invalid file type. Only images are allowed.', 400));
+    }
+
+    // Validate file size (additional check)
+    if (req.file.size > 5 * 1024 * 1024) {
+      return next(new AppError('File size too large. Maximum size is 5MB.', 400));
+    }
+
+    // Get current user
+    const user = await User.findById(req.user.id);
+    
+    if (!user) {
+      return next(new AppError('User not found', 404));
+    }
+
+    // Smart photo management: Only delete user's previous photos from Cloudinary
+    if (user.photo && user.photo !== 'default.png') {
+      try {
+        await removeUserPhotoFile(user.photo, req.user._id);
+      } catch (error) {
+        console.error('Error removing old photo (continuing with upload):', error);
+        // Continue with upload even if old photo removal fails
+      }
+    }
+
+    // Upload photo to Cloudinary
+    let uploadResult;
+    try {
+      const timestamp = Date.now();
+      const publicId = `users/${req.user._id}-${timestamp}`;
+      console.log(`Uploading photo to Cloudinary with publicId: ${publicId}`);
+      uploadResult = await uploadImage(req.file.buffer, 'users', publicId);
+      
+      if (!uploadResult || !uploadResult.secure_url) {
+        console.error('Cloudinary upload failed - no secure_url in response:', uploadResult);
+        return next(new AppError('Failed to upload photo to Cloudinary. Please try again.', 500));
+      }
+    } catch (error) {
+      console.error('Cloudinary upload error:', error);
+      return next(new AppError(`Failed to upload photo to Cloudinary: ${error.message || 'Unknown error'}`, 500));
+    }
+
+    const photoUrl = uploadResult.secure_url;
+    console.log(`✅ Photo uploaded to Cloudinary: ${photoUrl}`);
+
+    // Update user with new photo URL in database
+    const updatedUser = await User.findByIdAndUpdate(
+      req.user.id,
+      { photo: photoUrl },
+      { new: true, runValidators: true }
+    );
+
+    // Verify database update was successful
+    if (!updatedUser) {
+      console.error('Failed to update user in database after Cloudinary upload');
+      return next(new AppError('Failed to update user photo in database', 500));
+    }
+
+    console.log(`✅ Database updated - User photo field:`, updatedUser.photo);
+
+    // Verify database update was successful
+    await verifyUserPhotoInDatabase(req.user._id);
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Photo uploaded successfully',
+      data: {
+        user: updatedUser,
+        photoUrl: photoUrl
+      }
+    });
+  } catch (error) {
+    console.error('Unexpected error in uploadPhoto:', error);
+    return next(new AppError(`Failed to upload photo: ${error.message || 'Unknown error'}`, 500));
+  }
 });
 
 // Photo remove endpoint
