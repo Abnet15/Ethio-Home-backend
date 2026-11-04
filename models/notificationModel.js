@@ -8,7 +8,7 @@ const notificationSchema = new mongoose.Schema({
   },
   type: {
     type: String,
-    enum: ['contact_response', 'property_approved', 'property_rejected', 'message_received', 'subscription_expired', 'payment_success', 'general'],
+    enum: ['contact_response', 'property_approved', 'property_rejected', 'message_received', 'subscription_expired', 'payment_success', 'general', 'interest_received'],
     required: [true, 'Notification type is required']
   },
   title: {
@@ -66,7 +66,7 @@ notificationSchema.index({ type: 1 });
 notificationSchema.index({ priority: 1 });
 
 // Virtual for time ago
-notificationSchema.virtual('timeAgo').get(function() {
+notificationSchema.virtual('timeAgo').get(function () {
   const now = new Date();
   const diffInMs = now - this.createdAt;
   const diffInMinutes = Math.floor(diffInMs / (1000 * 60));
@@ -83,7 +83,7 @@ notificationSchema.virtual('timeAgo').get(function() {
 });
 
 // Pre-save middleware
-notificationSchema.pre('save', function(next) {
+notificationSchema.pre('save', function (next) {
   if (this.isNew) {
     // Set default priority based on type
     if (this.type === 'contact_response') {

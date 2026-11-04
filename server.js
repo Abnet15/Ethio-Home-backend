@@ -1,5 +1,5 @@
-require('dotenv').config({ path: './config.env' });
-const path=require('path');
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, 'config.env') });
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -13,14 +13,14 @@ const hpp = require('hpp');
 const cookieParser = require('cookie-parser');
 const compression = require('compression');
 const globalErrorHandler = require('./controllers/errorController');
-const AppError=require('./utils/appError')
+const AppError = require('./utils/appError')
 const socketAuth = require('./utils/socketAuth');
 const propertyRoutes = require('./routes/propertyRoutes');
 const userRoutes = require('./routes/userRoutes');
 const interestRoutes = require('./routes/interestRoutes');
 const sellingRoutes = require('./routes/sellingRoutes');
 const reviewRoutes = require('./routes/reviewRoutes');
-const subscriptionRoutes=require('./routes/subscription');
+const subscriptionRoutes = require('./routes/subscription');
 const messageRoutes = require('./routes/messageRoutes');
 const contactRoutes = require('./routes/contactRoutes');
 const notificationRoutes = require('./routes/notificationRoutes');
@@ -56,7 +56,7 @@ io.use(socketAuth);
 io.on('connection', async (socket) => {
   const userId = socket.userId;
   const user = socket.user;
-  
+
   if (!userId || !user) {
     console.log('Socket connection rejected: Invalid authentication');
     socket.disconnect();
@@ -65,13 +65,13 @@ io.on('connection', async (socket) => {
 
   // Join user's personal room
   socket.join(userId);
-  
+
   // Track online user
   onlineUsers.set(userId, socket.id);
-  
+
   // Notify user is online
   socket.broadcast.emit('user:online', { userId, user: { _id: user._id, name: user.name, photo: user.photo } });
-  
+
   console.log(`✅ Socket connected for user ${userId} (${user.name})`);
 
   // Handle typing indicators
@@ -147,16 +147,16 @@ app.use(cors({
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
-})); 
+}));
 app.options('*', cors({
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 }));
 
 // Body parser
-app.use(express.json({ limit: '10kb' })); 
+app.use(express.json({ limit: '10kb' }));
 app.use(express.urlencoded({ extended: true, limit: '10kb' }));
-app.use(cookieParser()); 
+app.use(cookieParser());
 
 // Serve static files with proper CORS headers
 app.use('/img', express.static(path.join(__dirname, 'uploads/img'), {
@@ -192,9 +192,9 @@ app.use(compression());
 
 // Rate limiting
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, 
-  max: 10000 ,
-  message:"Too many requests. please try again later!"
+  windowMs: 15 * 60 * 1000,
+  max: 10000,
+  message: "Too many requests. please try again later!"
 });
 app.use(limiter);
 
@@ -211,35 +211,35 @@ app.use('/api/v1/properties', propertyRoutes);
 app.use('/api/v1/interest', interestRoutes);
 app.use('/api/v1/reviews', reviewRoutes);
 app.use('/api/v1/selling', sellingRoutes);
-app.use('/api/v1/subscription',subscriptionRoutes);
+app.use('/api/v1/subscription', subscriptionRoutes);
 app.use('/api/v1/messages', messageRoutes);
 app.use('/api/v1/contact', contactRoutes);
 app.use('/api/v1/notifications', notificationRoutes);
 
 
 // Handle 404 routes
-app.all('*',(req, res, next) => {
- next(new AppError(`Can't find ${req.originalUrl} on this server!`, 404));
+app.all('*', (req, res, next) => {
+  next(new AppError(`Can't find ${req.originalUrl} on this server!`, 404));
 });
 
 // Global error handling middleware
 app.use(globalErrorHandler);
 
 // Connect to MongoDB
-const dbURI = process.env.DATABASE;
+const dbURI = process.env.MONGODB_URI || process.env.DATABASE || 'mongodb://localhost:27017/ethiohome';
 mongoose.connect(dbURI, {
   useNewUrlParser: true,
   useUnifiedTopology: true
 })
-.then(() => {
-  console.log('DB connection successful!');
-  console.log('Connected to:', dbURI);
-})
-.catch((err) => {
-  console.error('MongoDB connection error:', err);
-  console.error('Please check your database connection and try again.');
-  process.exit(1);
-});
+  .then(() => {
+    console.log('DB connection successful!');
+    console.log('Connected to:', dbURI);
+  })
+  .catch((err) => {
+    console.error('MongoDB connection error:', err);
+    console.error('Please check your database connection and try again.');
+    process.exit(1);
+  });
 
 // Start server
 const PORT = process.env.PORT || 5000;

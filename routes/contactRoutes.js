@@ -8,10 +8,11 @@ const router = express.Router();
 router.get('/departments', contactController.getContactDepartments);
 router.get('/faqs', contactController.getContactFAQs);
 router.post('/faqs/:id/rate', contactController.rateFAQ);
+router.post('/', contactController.submitContact);
+router.post('/submit', contactController.submitContact);
 
 // Protected routes - admin and employee
 router.use(authController.protect);
-router.post('/submit', contactController.submitContact);
 router.get('/:id', contactController.getContact);
 router.use(authController.restrictTo('admin', 'employee'));
 

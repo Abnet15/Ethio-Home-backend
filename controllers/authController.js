@@ -36,11 +36,11 @@ const createSendToken = (user, statusCode, req, res,next) => {
 };
 
 exports.signup = catchAsync(async (req, res, next) => {
-  const user=await User.find({email: req.body.email})
-  //console.log(user)
-  if(user.length){
-    throw new AppError('user already exit',403);
-  };
+  const existingUser = await User.findOne({ email: req.body.email });
+  if (existingUser) {
+    throw new AppError('An account with this email already exists', 400);
+  }
+
   const newUser = await User.create({
     name: req.body.name,
     email: req.body.email,
@@ -48,19 +48,28 @@ exports.signup = catchAsync(async (req, res, next) => {
     passwordConfirm: req.body.passwordConfirm,
     photo: req.body.photo,
     phone: req.body.phone,
+    role: req.body.role || 'buyer',
     location: req.body.location,
     address: req.body.address,
     city: req.body.city,
     state: req.body.state
   });
-  const url = `http://localhost:3000/users/verifyEmail/${newUser._id}`;
-  //console.log(url);
-  await new Email(newUser, url).sendWelcome();
-  //createSendToken(newUser, 201, req, res);
+
+  const frontendBase = process.env.FRONTEND_URL || 'https://ethio-home-frontend-ethn.vercel.app';
+  const url = `${frontendBase}/users/verifyEmail/${newUser._id}`;
+
+  try {
+    await new Email(newUser, url).sendWelcome();
+    console.log(`✅ Verification email sent to ${newUser.email}`);
+  } catch (emailErr) {
+    console.error('⚠️ Verification email delivery error (user created):', emailErr.message);
+  }
+
   res.status(201).json({
     status: 'success',
-    message: 'singin successfully. please verify your emali'
-  })
+    message: 'Registration successful! Please check your email to verify your account.',
+    userId: newUser._id
+  });
 });
 
 exports.sendAgain=catchAsync( async (req,res)=>{

@@ -7,6 +7,12 @@ class NotificationService {
     try {
       const notification = new Notification(notificationData);
       await notification.save();
+
+      // Emit socket event for real-time notification
+      if (global.io) {
+        global.io.to(notification.recipient.toString()).emit('notification:new', notification);
+      }
+
       return { success: true, data: notification };
     } catch (error) {
       console.error('Error creating notification:', error);
@@ -19,7 +25,7 @@ class NotificationService {
     try {
       // Find the user by email (since contact form might be submitted by non-registered users)
       const user = await User.findOne({ email: contact.email });
-      
+
       if (!user) {
         // If user doesn't exist, we can't create a notification
         // But we can still log this for tracking
@@ -51,11 +57,37 @@ class NotificationService {
     }
   }
 
+  // Create interest received notification
+  static async createInterestNotification(interest, property, sender) {
+    try {
+      const notificationData = {
+        recipient: property.owner,
+        type: 'interest_received',
+        title: `New Interest: ${property.title}`,
+        message: `${sender.name} has expressed interest in your property "${property.title}".`,
+        relatedProperty: property._id,
+        sender: sender._id,
+        priority: 'high',
+        actionUrl: `/dashboard/interests`,
+        metadata: {
+          interestId: interest._id,
+          propertyId: property._id,
+          offerAmount: interest.offerAmount
+        }
+      };
+
+      return await this.createNotification(notificationData);
+    } catch (error) {
+      console.error('Error creating interest notification:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
   // Get notifications for a user
   static async getUserNotifications(userId, options = {}) {
     try {
       const { limit = 50, skip = 0, unreadOnly = false } = options;
-      
+
       const filter = { recipient: userId };
       if (unreadOnly) {
         filter.isRead = false;
@@ -174,7 +206,7 @@ class NotificationService {
 
       const stat = stats[0];
       const byType = {};
-      
+
       stat.byType.forEach(item => {
         if (!byType[item.type]) {
           byType[item.type] = { total: 0, unread: 0 };

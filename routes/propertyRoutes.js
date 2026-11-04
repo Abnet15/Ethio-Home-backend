@@ -25,9 +25,7 @@ router.route('/seller/:ownerId')
     propertyController.getPropertiesBySeller);
 
 router.route('/property-stats')
-.get(authController.protect,
-    authController.restrictTo('admin', 'employee'),
-    propertyController.getPropertyStats);
+.get(propertyController.getPropertyStats);
 
 // Property image management routes
 router.post('/:id/upload-images', 
